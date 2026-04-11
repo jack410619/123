@@ -1,0 +1,161 @@
+// 核心設定：請在專案屬性中填入對應的 Key
+const CONFIG = {
+  SUPABASE_URL: PropertiesService.getScriptProperties().getProperty('SUPABASE_URL'),
+  SUPABASE_KEY: PropertiesService.getScriptProperties().getProperty('SUPABASE_KEY'),
+  GEMINI_KEY: PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY'),
+  LINE_TOKEN: PropertiesService.getScriptProperties().getProperty('LINE_ACCESS_TOKEN'),
+  CWA_API_KEY: PropertiesService.getScriptProperties().getProperty('CWA_API_KEY'),
+  MY_LINE_USER_ID: PropertiesService.getScriptProperties().getProperty('MY_LINE_USER_ID') // 可選
+};
+
+/**
+ * 早報：天氣 + 今日待辦 (建議設定 07:30 觸發)
+ */
+function sendMorningBrief() {
+  // 1. 抓取台灣專屬天氣 (CWA)
+  const weatherInfo = fetchCWAWeather("臺中市"); // 如果你住其他地方，請改成例如 "臺中市" 或 "高雄市"
+
+  // 2. 抓取今日待辦 (due_at 是今天的)
+  // ... (底下維持原本抓取 Supabase 待辦的邏輯) ...
+  // 2. 抓取今日待辦 (due_at 是今天的)
+  const today = new Date().toISOString().split('T')[0];
+  const taskUrl = `${CONFIG.SUPABASE_URL}/rest/v1/knowledge_nodes?category=eq.待辦事項&due_at=lte.${today}T23:59:59Z&due_at=gte.${today}T00:00:00Z`;
+  const tasks = JSON.parse(fetchSupabase(taskUrl));
+
+  // 3. AI 生成早報內容
+  const prompt = `今天是 ${today}。目前天氣：${weatherInfo}。今日待辦清單：${JSON.stringify(tasks)}。
+  請以「☀️ 早安報報」為題，寫一段有精神的問候，列出今日重點任務。`;
+  
+  const content = callGemini(prompt);
+  pushToLine(content);
+}
+
+/**
+ * 晚報：今日知識點總結 (建議設定 22:00 觸發)
+ */
+function sendEveningReport() {
+  // 1. 抓取今日新增的知識點 (排除待辦事項)
+  const today = new Date().toISOString().split('T')[0];
+  const url = `${CONFIG.SUPABASE_URL}/rest/v1/knowledge_nodes?created_at=gte.${today}&category=neq.待辦事項`;
+  const nodes = JSON.parse(fetchSupabase(url));
+
+  if (nodes.length === 0) return;
+
+  // 2. AI 整理單字與知識點
+  const prompt = `你是我的助理。今天是 ${today}。請幫我做睡前的review of the day：${JSON.stringify(nodes)}。
+  請以「晚間report」為題，整理出今天關鍵單字、簡要知識點(不用解釋)與今天寫的行程(若有)。`;
+  
+  const content = callGemini(prompt);
+  pushToLine(content);
+}
+
+// --- 輔助函數 ---
+function fetchSupabase(url) {
+  const options = { "headers": { "apikey": CONFIG.SUPABASE_KEY, "Authorization": `Bearer ${CONFIG.SUPABASE_KEY}` } };
+  return UrlFetchApp.fetch(url, options).getContentText();
+}
+
+/**
+ * 終極版推播函數 (強制即時讀取屬性)
+ */
+function pushToLine(text) {
+  const props = PropertiesService.getScriptProperties();
+  const token = props.getProperty('LINE_ACCESS_TOKEN');
+  const userId = props.getProperty('MY_LINE_USER_ID');
+
+  if (!userId) {
+    Logger.log("❌ 錯誤：找不到 Line User ID");
+    return;
+  }
+
+  const url = 'https://api.line.me/v2/bot/message/push';
+  const payload = {
+    "to": userId.trim(), 
+    "messages": [{ "type": "text", "text": text }]
+  };
+  
+  const options = {
+    "method": "post",
+    "headers": { 
+      "Content-Type": "application/json", 
+      "Authorization": `Bearer ${token}` 
+    },
+    "payload": JSON.stringify(payload),
+    "muteHttpExceptions": true
+  };
+  
+  UrlFetchApp.fetch(url, options);
+}
+
+/**
+ * 抓取中央氣象署 (CWA) 36 小時天氣預報
+ * 預設抓取「臺北市」，可自行更改
+ */
+function fetchCWAWeather(cityName = "臺中市") {
+  const apiKey = PropertiesService.getScriptProperties().getProperty('CWA_API_KEY');
+  // 注意：CWA 的城市名稱必須是繁體標準字，例如「臺北市」、「新北市」、「臺中市」
+  const url = `https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-C0032-001?Authorization=${apiKey}&locationName=${encodeURIComponent(cityName)}`;
+  
+  try {
+    const response = UrlFetchApp.fetch(url, { "muteHttpExceptions": true });
+    const data = JSON.parse(response.getContentText());
+    
+    // 檢查是否有回傳正確資料
+    if (data.success !== "true") return "暫時無法取得氣象署資料";
+
+    const elements = data.records.location[0].weatherElement;
+    
+    // 提取我們需要的數據：Wx(天氣)、PoP(降雨機率)、MinT(最低溫)、MaxT(最高溫)
+    const wx = elements.find(e => e.elementName === 'Wx').time[0].parameter.parameterName;
+    const pop = elements.find(e => e.elementName === 'PoP').time[0].parameter.parameterName;
+    const minT = elements.find(e => e.elementName === 'MinT').time[0].parameter.parameterName;
+    const maxT = elements.find(e => e.elementName === 'MaxT').time[0].parameter.parameterName;
+    
+    return `☁️ ${wx} | 🌡️ 氣溫：${minT}~${maxT}°C | ☔ 降雨機率：${pop}%`;
+    
+  } catch (err) {
+    Logger.log("CWA API 錯誤: " + err.message);
+    return "天氣資料讀取失敗";
+  }
+}
+/**
+ * 呼叫 Gemini API 的核心函數
+ */
+function callGemini(promptText) {
+  // 從專案屬性中抓取 API Key (確保你新專案有設定 GEMINI_API_KEY)
+  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  
+  // 使用 Gemini 2.5 Flash (速度快、適合文字處理)
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  
+  const payload = {
+    "contents": [{
+      "parts": [{
+        "text": promptText
+      }]
+    }]
+  };
+  
+  const options = {
+    "method": "post",
+    "contentType": "application/json",
+    "payload": JSON.stringify(payload),
+    "muteHttpExceptions": true
+  };
+  
+  try {
+    const response = UrlFetchApp.fetch(url, options);
+    const json = JSON.parse(response.getContentText());
+    
+    // 成功回傳生成的文字
+    if (json.candidates && json.candidates.length > 0) {
+      return json.candidates[0].content.parts[0].text;
+    } else {
+      Logger.log("Gemini 回傳異常：" + response.getContentText());
+      return "【AI 總結失敗】請檢查 API 額度或回傳格式。";
+    }
+  } catch (err) {
+    Logger.log("呼叫 Gemini 發生錯誤：" + err.toString());
+    return "【系統異常】無法連線至 AI 引擎。";
+  }
+}
