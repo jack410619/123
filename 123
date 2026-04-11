@@ -1,0 +1,359 @@
+// ==========================================
+// 1. 網頁進入點：顯示輸入介面
+// ==========================================
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile('Index')
+    .setTitle('AI 第二大腦 🧠')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+// ==========================================
+// 2. 白天收集：儲存筆記到暫存區
+// ==========================================
+function saveNote(content) {
+  if (!content || content.trim() === '') {
+    return { success: false, message: '內容不能為空喔！' };
+  }
+  var props = PropertiesService.getScriptProperties();
+  var supabaseUrl = props.getProperty('SUPABASE_URL');
+  var supabaseKey = props.getProperty('SUPABASE_KEY');
+  var url = supabaseUrl + '/rest/v1/daily_notes';
+  
+  var options = {
+    "method": "post",
+    "headers": {
+      "apikey": supabaseKey,
+      "Authorization": "Bearer " + supabaseKey,
+      "Content-Type": "application/json",
+      "Prefer": "return=minimal"
+    },
+    "payload": JSON.stringify({ "content": content }),
+    "muteHttpExceptions": true
+  };
+  
+  try {
+    var response = UrlFetchApp.fetch(url, options);
+    return { success: true, message: '儲存成功' };
+  } catch (error) {
+    return { success: false, message: '系統錯誤: ' + error.toString() };
+  }
+}
+
+// ==========================================
+// 3. 夜間處理：向量化大腦 (Sprint 2 修復版)
+// ==========================================
+function processNightlySummary() {
+  var props = PropertiesService.getScriptProperties();
+  var supabaseUrl = props.getProperty('SUPABASE_URL');
+  var supabaseKey = props.getProperty('SUPABASE_KEY');
+  var geminiKey = props.getProperty('GEMINI_API_KEY');
+  
+  var headers = {
+    "apikey": supabaseKey,
+    "Authorization": "Bearer " + supabaseKey,
+    "Content-Type": "application/json",
+    "Prefer": "return=minimal"
+  };
+
+  // --- 步驟 1：抓取今天的筆記 ---
+  var getUrl = supabaseUrl + '/rest/v1/daily_notes?status=eq.pending';
+  var response = UrlFetchApp.fetch(getUrl, { "method": "get", "headers": headers });
+  var notes = JSON.parse(response.getContentText());
+  
+  if (notes.length === 0) {
+    Logger.log("💤 今天沒有新筆記。");
+    return;
+  }
+  var allContent = notes.map(function(n) { return "- " + n.content; }).join("\n");
+  
+// --- 步驟 2：呼叫 AI 進行知識萃取 ---
+  var geminiUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + geminiKey;
+  var nowIso = new Date().toISOString(); 
+  
+  var promptText = `你是知識萃取專家。請分析以下筆記，萃取出「知識節點」。
+  【時間基準】現在的標準時間是：${nowIso} (UTC時間)。
+  【重要格式規則】
+  1. 請嚴格將結果以「純 JSON 陣列」格式回傳，開頭必須是 [ ，結尾必須是 ]。
+  2. 如果 category 是「待辦事項」，且內容中含有時間暗示（例如：明天、下週二、4/20），請務必推算成 ISO 8601 格式存入 due_at 欄位（例如："2026-04-15T00:00:00Z"）。
+  3. 如果沒有明確時間，或 category 不是待辦事項，due_at 的值必須是 null (注意：不要加雙引號)。
+  內容：
+  ${allContent}`;
+
+  // 📦 這是給 Gemini 的包裹
+  var geminiPayload = {
+    "contents": [{"parts": [{"text": promptText}]}]
+  };
+
+  var geminiOptions = {
+    "method": "post",
+    "contentType": "application/json",
+    "payload": JSON.stringify(geminiPayload),
+    "muteHttpExceptions": true
+  };
+
+  try {
+    // 1. 正式向 Gemini 發送請求！
+    var response = UrlFetchApp.fetch(geminiUrl, geminiOptions);
+    var rawText = JSON.parse(response.getContentText()).candidates[0].content.parts[0].text;
+    
+    Logger.log("【AI 原始回傳】\n" + rawText);
+
+    // 2. 清洗並解析 JSON
+    var cleanText = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
+    var knowledgeNodes = JSON.parse(cleanText); 
+    
+    Logger.log("✅ 解析成功！共萃取出 " + knowledgeNodes.length + " 筆節點。");
+    
+    // --- 步驟 3：將萃取出的節點存入資料庫 ---
+    knowledgeNodes.forEach(function(node, index) {
+      if (!node) return; 
+
+      // 📦 這是給 Supabase 的包裹
+      var supabasePayload = {
+        "category": node.category,
+        "content": node.content,
+        // "embedding": vector,  <-- 如果你有用向量，記得加回來
+        "due_at": node.due_at || null 
+      };
+
+      var supabaseOptions = {
+        "method": "post",
+        "headers": {
+          "apikey": supabaseKey,  
+          "Authorization": "Bearer " + supabaseKey,
+          "Content-Type": "application/json"
+        },
+        "payload": JSON.stringify(supabasePayload),
+        "muteHttpExceptions": true
+      };
+
+      // 🚀 這裡是你剛才漏掉的「真正發送給 Supabase」的動作！
+      var insertUrl = supabaseUrl + '/rest/v1/knowledge_nodes'; 
+      var dbResponse = UrlFetchApp.fetch(insertUrl, supabaseOptions);
+      Logger.log("📦 存入 Supabase 結果：" + dbResponse.getResponseCode());
+
+    }); // 👈 解開 SyntaxError 詛咒的關鍵：迴圈必須用 }); 關門！
+
+    // --- 步驟 4：把原本的 Line 訊息標記為 processed ---
+    UrlFetchApp.fetch(supabaseUrl + '/rest/v1/daily_notes?status=eq.pending', {
+      "method": "patch",
+      "headers": {
+        "apikey": supabaseKey,  
+        "Authorization": "Bearer " + supabaseKey,
+        "Content-Type": "application/json"
+      }, 
+      "payload": JSON.stringify({ "status": "processed" })
+    });
+    
+    Logger.log("✨ 任務大功告成！");
+
+  } catch (err) {
+    Logger.log("❌ 系統發生崩潰：" + err.toString());
+  }
+} // 👈 這是整個函數最
+  
+  // --- 步驟 3：向量轉換與存檔 ---
+  var embedUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=" + geminiKey;
+  var insertUrl = supabaseUrl + '/rest/v1/knowledge_nodes';
+  
+  for (var i = 0; i < knowledgeNodes.length; i++) {
+  var node = knowledgeNodes[i];
+  var vector = null;
+
+  // 只有這幾類「高價值」內容才進行向量化 (節省空間)
+  var highValueCategories = ["知識點", "單字" , "想法"];
+  
+  if (highValueCategories.indexOf(node.category) !== -1) {
+    var embedResponse = UrlFetchApp.fetch(embedUrl, {
+      "method": "post",
+      "headers": { "Content-Type": "application/json" },
+      "payload": JSON.stringify({
+        "model": "models/gemini-embedding-001", // 推薦用 004，反應更快
+        "content": {"parts": [{"text": node.content}]},
+        "outputDimensionality": 768 // 強制降維，極致清亮
+      })
+    });
+    var res = JSON.parse(embedResponse.getContentText());
+    if (res.embedding) vector = "[" + res.embedding.values.join(",") + "]";
+  }
+
+  // 存入 Supabase
+  UrlFetchApp.fetch(insertUrl, {
+    "method": "post",
+    "headers": headers,
+    "payload": JSON.stringify({
+      "category": node.category,
+      "content": node.content,
+      "embedding": vector // 雜事類會是空值，節省空間
+    })
+  });
+}
+  
+  // --- 步驟 4：標記已處理 ---
+  UrlFetchApp.fetch(supabaseUrl + '/rest/v1/daily_notes?status=eq.pending', {
+    "method": "patch",
+    "headers": headers,
+    "payload": JSON.stringify({ "status": "processed" })
+  });
+  
+  Logger.log("任務完成！");
+
+
+// ==========================================
+// 4. 向量搜尋：混合檢索 (1+3 完美修復版)
+// ==========================================
+function searchKnowledge(userQuery) {
+  var props = PropertiesService.getScriptProperties();
+  var supabaseUrl = props.getProperty('SUPABASE_URL');
+  var supabaseKey = props.getProperty('SUPABASE_KEY');
+  var geminiKey = props.getProperty('GEMINI_API_KEY');
+
+  // --- 1. 將提問轉為 768 維向量 (方案 1：輕量化) ---
+  var embedUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=" + geminiKey;
+  
+  var embedResponse = UrlFetchApp.fetch(embedUrl, {
+    "method": "post",
+    "headers": { "Content-Type": "application/json" },
+    "payload": JSON.stringify({
+      "model": "models/gemini-embedding-001", 
+      "content": {"parts": [{"text": userQuery}]},
+      "outputDimensionality": 768 // 確保維度與資料庫一致
+    }),
+    "muteHttpExceptions": true
+  });
+  
+  var embedResult = JSON.parse(embedResponse.getContentText());
+  if (!embedResult.embedding) {
+    Logger.log("❌ 向量轉換失敗：" + embedResponse.getContentText());
+    return "❌ 向量服務暫時不可用。";
+  }
+  var queryVector = embedResult.embedding.values;
+
+  // --- 2. 呼叫 Supabase RPC (解決 404 問題) ---
+  var rpcUrl = supabaseUrl + '/rest/v1/rpc/match_knowledge_nodes';
+  
+  // 重點！這裡必須精準對應 SQL 函數的 4 個參數名稱
+  var rpcOptions = {
+    "method": "post",
+    "headers": {
+      "apikey": supabaseKey,
+      "Authorization": "Bearer " + supabaseKey,
+      "Content-Type": "application/json"
+    },
+    "payload": JSON.stringify({
+      "query_embedding": queryVector, // 參數 1
+      "query_text": userQuery,       // 參數 2 (補上這一行就修好了！)
+      "match_threshold": 0.4,         // 參數 3
+      "match_count": 8                // 參數 4
+    }),
+    "muteHttpExceptions": true
+  };
+  
+  var response = UrlFetchApp.fetch(rpcUrl, rpcOptions);
+  
+  if (response.getResponseCode() !== 200) {
+    Logger.log("❌ Supabase 報錯：" + response.getContentText());
+    return "❌ 連結大腦資料庫時發生技術錯誤。";
+  }
+
+  var searchResult = JSON.parse(response.getContentText());
+  if (searchResult.length === 0) return "❌ 在大腦裡找不到相關記憶。";
+
+  // --- 3. 整理背景知識並讓 AI 回答 ---
+  var contextText = searchResult.map(r => {
+    var dateStr = new Date(r.created_at).toLocaleDateString('zh-TW');
+    return `[紀錄日期: ${dateStr}] [分類: ${r.category}]: ${r.content}`;
+  }).join("\n\n");
+
+  var geminiUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + geminiKey;
+  var promptText = `你是我的第二大腦助手。今天的日期是 ${new Date().toLocaleDateString('zh-TW')}。
+請根據以下背景知識回答問題。
+
+【背景知識記憶】：
+${contextText}
+
+【我的問題】：${userQuery}`;
+
+  var aiResponse = UrlFetchApp.fetch(geminiUrl, {
+    "method": "post",
+    "headers": { "Content-Type": "application/json" },
+    "payload": JSON.stringify({ "contents": [{"parts": [{"text": promptText}]}] })
+  });
+  
+  return JSON.parse(aiResponse.getContentText()).candidates[0].content.parts[0].text;
+}
+
+// ==========================================
+// 5. Line Bot 入口：處理傳入訊息
+// ==========================================
+function doPost(e) {
+  var props = PropertiesService.getScriptProperties();
+  var lineToken = props.getProperty('LINE_ACCESS_TOKEN');
+  
+  try {
+    var contents = JSON.parse(e.postData.contents);
+    var event = contents.events[0];
+    if (!event) return;
+
+    var replyToken = event.replyToken;
+    var userMessage = event.message.text;
+
+    // --- 判斷模式 ---
+    if (userMessage.indexOf("問 ") === 0 || userMessage.indexOf("Q:") === 0) {
+      // 模式 A：搜尋模式 -> 需要回傳答案
+      var query = userMessage.replace("問 ", "").replace("Q:", "").trim();
+      var responseText = "🔍 正在檢索大腦...\n---\n" + searchKnowledge(query);
+      
+      // 執行回傳 (只有搜尋時才呼叫 Line API)
+      replyToLine(replyToken, responseText, lineToken);
+      
+    } else {
+      // 模式 B：儲存模式 -> 靜默執行
+      saveNote(userMessage);
+      
+      // 這裡不呼叫 replyToLine，所以 Line 不會跳出任何回應
+      // 你的手機會保持安靜，資料則會乖乖進到 Supabase
+    }
+
+  } catch (err) {
+    Logger.log("發生錯誤：" + err.toString());
+  }
+}
+
+// 為了讓代碼整潔，我們把回傳邏輯抽出來
+function replyToLine(replyToken, text, token) {
+  var url = 'https://api.line.me/v2/bot/message/reply';
+  UrlFetchApp.fetch(url, {
+    'headers': {
+      'Content-Type': 'application/json; charset=UTF-8',
+      'Authorization': 'Bearer ' + token,
+    },
+    'method': 'post',
+    'payload': JSON.stringify({
+      'replyToken': replyToken,
+      'messages': [{ 'type': 'text', 'text': text }],
+    }),
+    'muteHttpExceptions': true
+  });
+}
+function cleanupProcessedNotes() {
+  var props = PropertiesService.getScriptProperties();
+  var supabaseUrl = props.getProperty('SUPABASE_URL');
+  var supabaseKey = props.getProperty('SUPABASE_KEY');
+  
+  // 刪除所有已處理的資料，只留下還沒處理的
+  var deleteUrl = supabaseUrl + '/rest/v1/daily_notes?status=eq.processed';
+  
+  var options = {
+    "method": "delete",
+    "headers": {
+      "apikey": supabaseKey,
+      "Authorization": "Bearer " + supabaseKey
+    },
+    "muteHttpExceptions": true
+  };
+  
+  var response = UrlFetchApp.fetch(deleteUrl, options);
+  Logger.log("清理結果：" + response.getResponseCode());
+}
