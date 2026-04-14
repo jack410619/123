@@ -9,41 +9,76 @@ const CONFIG = {
 };
 
 /**
- * 早報：天氣 + 今日待辦 (建議設定 07:30 觸發)
+ * 終極時間轉換器：輸入台灣時間，輸出精準的 UTC 查詢邊界
+ */
+function getTaiwanDayBoundsUTC(targetDateObj) {
+  const twDateStr = Utilities.formatDate(targetDateObj, "Asia/Taipei", "yyyy-MM-dd");
+  const twStart = new Date(`${twDateStr}T00:00:00+08:00`);
+  const twEnd = new Date(`${twDateStr}T23:59:59+08:00`);
+  return {
+    twDateStr: twDateStr,
+    startUTC: twStart.toISOString(),
+    endUTC: twEnd.toISOString()
+  };
+}
+
+/**
+ * 早報：徹底移除 UTC 邏輯，改為純日期比對
  */
 function sendMorningBrief() {
-  // 1. 抓取台灣專屬天氣 (CWA)
-  const weatherInfo = fetchCWAWeather("臺中市"); // 如果你住其他地方，請改成例如 "臺中市" 或 "高雄市"
+  const weatherInfo = fetchCWAWeather("臺中市");
 
-  // 2. 抓取今日待辦 (due_at 是今天的)
-  // ... (底下維持原本抓取 Supabase 待辦的邏輯) ...
-  // 2. 抓取今日待辦 (due_at 是今天的)
-  const today = new Date().toISOString().split('T')[0];
-  const taskUrl = `${CONFIG.SUPABASE_URL}/rest/v1/knowledge_nodes?category=eq.待辦事項&due_at=lte.${today}T23:59:59Z&due_at=gte.${today}T00:00:00Z`;
+  // 1. 取得台灣今天的純日期字串
+  const todayStr = Utilities.formatDate(new Date(), "Asia/Taipei", "yyyy-MM-dd");
+
+  // 2. 組合網址：直接使用 eq (等於) 查詢日期字串
+  const categoryEncoded = encodeURIComponent('待辦事項');
+  const taskUrl = `${CONFIG.SUPABASE_URL}/rest/v1/knowledge_nodes?category=eq.${categoryEncoded}&due_at=eq.${todayStr}`;
+  
+  // 3. 抓取資料 (fetchSupabase 內部已處理 API Key)
   const tasks = JSON.parse(fetchSupabase(taskUrl));
 
-  // 3. AI 生成早報內容
-  const prompt = `今天是 ${today}。目前天氣：${weatherInfo}。今日待辦清單：${JSON.stringify(tasks)}。
-  請以「☀️ 早安報報」為題，寫一段有精神的問候，列出今日重點任務。`;
+  let taskContent = tasks.length === 0 ? "今天沒有任務，祝你有輕鬆的一天！" : JSON.stringify(tasks);
+
+  const prompt = `今天是 ${todayStr}。天氣：${weatherInfo}。任務：${taskContent}。
+  你是我(Jack)的私人小助理，請以「☀️ 早安報報」為題做簡短問候並列出重點。`;
   
   const content = callGemini(prompt);
   pushToLine(content);
 }
 
 /**
- * 晚報：今日知識點總結 (建議設定 22:00 觸發)
+ * 晚報/夜間報表：知識點總結 (純日期極致清爽版)
  */
 function sendEveningReport() {
-  // 1. 抓取今日新增的知識點 (排除待辦事項)
-  const today = new Date().toISOString().split('T')[0];
-  const url = `${CONFIG.SUPABASE_URL}/rest/v1/knowledge_nodes?created_at=gte.${today}&category=neq.待辦事項`;
-  const nodes = JSON.parse(fetchSupabase(url));
+  const now = new Date();
+  
+  // 1. 智慧跨日判斷：凌晨 0 點 ~ 6 點執行，就退回「昨天」
+  if (now.getHours() < 6) {
+    now.setDate(now.getDate() - 1);
+  }
+  
+  // 取得台灣時間的目標日期字串 (YYYY-MM-DD)
+  const targetDateStr = Utilities.formatDate(now, "Asia/Taipei", "yyyy-MM-dd");
+  const categoryEncoded = encodeURIComponent('待辦事項');
+  
+  // 2. ✨ 終極修復：直接用 eq 比對 created_at 的日期字串！
+  const url = `${CONFIG.SUPABASE_URL}/rest/v1/knowledge_nodes?created_at=eq.${targetDateStr}&category=neq.${categoryEncoded}`;
+  
+  Logger.log("晚報查詢網址: " + url);
 
-  if (nodes.length === 0) return;
+  const response = fetchSupabase(url);
+  const nodes = JSON.parse(response);
 
-  // 2. AI 整理單字與知識點
-  const prompt = `你是我的助理。今天是 ${today}。請幫我做睡前的review of the day：${JSON.stringify(nodes)}。
-  請以「晚間report」為題，整理出今天關鍵單字、簡要知識點(不用解釋)與今天寫的行程(若有)。`;
+  // 3. 防呆機制
+  if (nodes.length === 0) {
+    pushToLine(`🌙 晚報時間：大腦資料庫顯示，${targetDateStr} 沒有新增任何單字或知識點喔！早點休息吧！`);
+    return;
+  }
+
+  // 4. AI 整理單字與知識點
+  const prompt = `你是我的助理。請幫我做 ${targetDateStr} 的 review of the day：${JSON.stringify(nodes)}。
+  請以「🌙 晚間 Report」為題，整理出關鍵單字、簡要知識點(不用解釋)與寫的行程(若有)。`;
   
   const content = callGemini(prompt);
   pushToLine(content);
@@ -125,7 +160,7 @@ function callGemini(promptText) {
   // 從專案屬性中抓取 API Key (確保你新專案有設定 GEMINI_API_KEY)
   const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
   
-  // 使用 Gemini 2.5 Flash (速度快、適合文字處理)
+  // 使用 Gemini 1.5 Flash (速度快、適合文字處理)
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
   
   const payload = {
@@ -157,5 +192,51 @@ function callGemini(promptText) {
   } catch (err) {
     Logger.log("呼叫 Gemini 發生錯誤：" + err.toString());
     return "【系統異常】無法連線至 AI 引擎。";
+  }
+}
+
+/**
+ * App 2: 清理過期待辦事項 (防呆靜默 + 2天寬限期版)
+ */
+function cleanupExpiredTasks() {
+  const props = PropertiesService.getScriptProperties();
+  const supabaseUrl = props.getProperty('SUPABASE_URL');
+  const supabaseKey = props.getProperty('SUPABASE_KEY');
+  
+  // 💡 核心修改：計算出「兩天前」的時間基準
+  const thresholdDate = new Date();
+  thresholdDate.setDate(thresholdDate.getDate() - 2); 
+  const thresholdIso = thresholdDate.toISOString();
+  
+  // 告訴資料庫：只刪除 due_at 早於「兩天前」的待辦事項
+  const deleteUrl = `${supabaseUrl}/rest/v1/knowledge_nodes?category=eq.待辦事項&due_at=lt.${thresholdIso}`;
+  
+  const options = {
+    "method": "delete",
+    "headers": { 
+      "apikey": supabaseKey, 
+      "Authorization": `Bearer ${supabaseKey}`,
+      "Prefer": "return=representation" // 要求 Supabase 回傳被刪掉的資料
+    },
+    "muteHttpExceptions": true 
+  };
+  
+  try {
+    const response = UrlFetchApp.fetch(deleteUrl, options);
+    const code = response.getResponseCode();
+    
+    if (code >= 200 && code < 300) {
+      const deletedData = JSON.parse(response.getContentText() || "[]");
+      
+      if (deletedData.length === 0) {
+        Logger.log("✨ 掃描完畢：目前沒有過期超過 2 天的待辦事項需要清理。");
+      } else {
+        Logger.log(`✅ 清理成功：共移除了 ${deletedData.length} 筆過期超過 2 天的任務！`);
+      }
+    } else {
+      Logger.log(`⚠️ 清理發生異常，伺服器回應碼：${code}，原因：${response.getContentText()}`);
+    }
+  } catch (err) {
+    Logger.log(`❌ 系統執行崩潰：${err.toString()}`);
   }
 }
