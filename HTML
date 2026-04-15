@@ -12,7 +12,7 @@
       --bg: #0f172a;
       --card-bg: rgba(255, 255, 255, 0.05);
     }
-    
+
     body {
       font-family: 'Inter', -apple-system, sans-serif;
       background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
@@ -119,10 +119,18 @@
   </style>
 </head>
 <body>
-
   <div class="container">
     <h1>BRAIN CORE v2.0</h1>
 
+    <div id="clipboard-container" style="display:none; background-color: #fff3cd; border: 1px solid #ffeeba; padding: 20px; border-radius: 12px; margin: 20px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <span style="font-weight: bold; color: #856404; font-size: 1.1em;">📌 雲端剪貼內容</span>
+        <button onclick="getAndClearCache()" style="background-color: #856404; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; transition: opacity 0.2s;">
+          複製並清除
+        </button>
+      </div> <div id="cache-text" style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #ddd; word-break: break-all; white-space: pre-wrap; font-family: monospace; color: #333;">
+        </div>
+    </div>
     <div class="glass-card">
       <span class="label">Input Thought</span>
       <textarea id="noteInput" rows="4" placeholder="在此輸入新知識、見解或待辦事項..."></textarea>
@@ -140,43 +148,53 @@
       </button>
       <div id="result"></div>
     </div>
-  </div>
+    
+  </div> <script>
+  // ==========================================
+  // 👇 把「第 2 部分」的代碼貼在這裡！
+  // ==========================================
 
-  <script>
-    function saveNote() {
-      const btn = document.getElementById('saveBtn');
-      const content = document.getElementById('noteInput').value;
-      const status = document.getElementById('saveStatus');
-      if(!content) return;
+  // 1. 初始化時檢查快取
+  window.onload = function() {
+    fetchClipboard(); // 檢查有沒有快取
+    fetchNotes();     // 原有的讀取筆記
+  };
 
-      btn.disabled = true;
-      status.innerText = "正在編碼並寫入雲端...";
-
-      google.script.run.withSuccessHandler((res) => {
-        status.innerText = "✨ 記憶已成功同步！";
-        document.getElementById('noteInput').value = '';
-        btn.disabled = false;
-        setTimeout(() => { status.innerText = ""; }, 3000);
-      }).saveNote(content);
+  // 2. 雲端剪貼簿：抓取資料
+  async function fetchClipboard() {
+    const url = `${SUPABASE_URL}/rest/v1/daily_notes?status=eq.cached&select=content`;
+    const response = await fetch(url, {
+      headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` }
+    });
+    const data = await response.json();
+    
+    const container = document.getElementById('clipboard-container');
+    const textElem = document.getElementById('cache-text');
+    
+    if (data && data.length > 0) {
+      container.style.display = 'block';
+      textElem.innerText = data[0].content;
+    } else {
+      container.style.display = 'none';
     }
+  }
 
-    function searchBrain() {
-      const btn = document.getElementById('searchBtn');
-      const query = document.getElementById('queryInput').value;
-      const resDiv = document.getElementById('result');
-      if(!query) return;
-      
-      btn.disabled = true;
-      btn.classList.add('pulse');
-      resDiv.style.display = "block";
-      resDiv.innerHTML = "<i>🧬 正在掃描向量空間並組織回答...</i>";
+  // 3. 雲端剪貼簿：取走並刪除
+  async function getAndClearCache() {
+    const text = document.getElementById('cache-text').innerText;
+    navigator.clipboard.writeText(text); // 複製到電腦剪貼簿
+    
+    const url = `${SUPABASE_URL}/rest/v1/daily_notes?status=eq.cached`;
+    await fetch(url, {
+      method: "DELETE",
+      headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` }
+    });
+    
+    alert("📋 內容已複製，並從雲端清除！");
+    fetchClipboard(); // 重新整理 UI
+  }
 
-      google.script.run.withSuccessHandler((answer) => {
-        resDiv.innerText = answer;
-        btn.disabled = false;
-        btn.classList.remove('pulse');
-      }).searchKnowledge(query);
-    }
-  </script>
+  // ... 下面是你原本就有的 fetchNotes() 等函數 ...
+</script>
 </body>
 </html>
