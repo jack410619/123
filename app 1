@@ -73,14 +73,14 @@ function processNightlySummary() {
 
 // ✨ 強制產生台灣時間，確保 AI 的「今天」是正確的
   var nowTW = Utilities.formatDate(new Date(), "Asia/Taipei", "yyyy-MM-dd'T'HH:mm:ssXXX");
-
-  var promptText = `你是知識萃取專家。請分析以下筆記，萃取出「知識節點」。
-  【時間基準】現在的台灣標準時間是：${nowTW}。
-  【重要格式規則】
-  1. 請嚴格將結果以「純 JSON 陣列」格式回傳，開頭必須是 [ ，結尾必須是 ]。
-  2. 請以知識點, 單字, 想法, 待辦事項進行歸類
-  3. 如果 category 是「待辦事項」，請推算它的日期，並嚴格以純字串 YYYY-MM-DD 格式存入 due_at 欄位（例如："2026-04-15"）。絕對不要加上任何時間或時區代碼。
-  4. 如果沒有明確時間，或 category 不是待辦事項，due_at 的值必須是 null (注意：不要加雙引號)。
+  var promptText = `你是知識萃取專家。請分析筆記並輸出 JSON 陣列。
+    【重要：格式與日期規則】
+  1. 你必須嚴格回傳這個 JSON 結構：[{"category": "分類", "content": "詳細內容", "due_at": "日期或 null"}]
+  2. 「絕對不可」遺漏 content 欄位或改變欄位名稱！
+  3. 現在的台灣日期是：${nowTW}。
+  4. 如果是「待辦事項」，due_at 嚴格填入 "YYYY-MM-DD"（如 "2026-04-16"），不加任何時間。
+  5. 請以知識點, 單字, 想法, 待辦事項進行歸類
+  6. 若非待辦事項，due_at 必須為 null (不要加雙引號)。
   內容：
   ${allContent}`;
 
@@ -204,17 +204,20 @@ function searchKnowledge(userQuery) {
   var geminiKey = props.getProperty('GEMINI_API_KEY');
 
   var embedUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=" + geminiKey;
+  
   var embedOptions = {
-  "method": "post",
-  "headers": { "Content-Type": "application/json" },
-  "payload": JSON.stringify({
-    "model": "models/gemini-embedding-001",
-    "content": {"parts": [{"text": node.content}]},
-    "outputDimensionality": 768
-  }),
-  "muteHttpExceptions": true
-};
-var embedResponse = fetchWithRetry(embedUrl, embedOptions);
+    "method": "post",
+    "headers": { "Content-Type": "application/json" },
+    "payload": JSON.stringify({
+      "model": "models/gemini-embedding-001",
+      // ✨ 關鍵修復：這裡要轉換成向量的是使用者的問題 (userQuery)，而不是 node.content！
+      "content": {"parts": [{"text": userQuery}]}, 
+      "outputDimensionality": 768
+    }),
+    "muteHttpExceptions": true
+  };
+
+  var embedResponse = fetchWithRetry(embedUrl, embedOptions);
   
   var embedResult = JSON.parse(embedResponse.getContentText());
   if (!embedResult.embedding) return "❌ 向量服務暫時不可用。";
@@ -271,25 +274,74 @@ ${contextText}
 function doPost(e) {
   var props = PropertiesService.getScriptProperties();
   var lineToken = props.getProperty('LINE_ACCESS_TOKEN');
+  
   try {
     var contents = JSON.parse(e.postData.contents);
     var event = contents.events[0];
-    if (!event) return;
+    // 增加一個防呆：確保進來的是文字訊息，避免貼圖或照片讓程式當機
+    if (!event || event.type !== 'message' || event.message.type !== 'text') return; 
 
     var replyToken = event.replyToken;
-    var userMessage = event.message.text;
+    var userMessage = event.message.text.trim(); // 收到訊息先去頭去尾空白
 
-    if (userMessage.indexOf("問 ") === 0 || userMessage.indexOf("Q:") === 0) {
-      var query = userMessage.replace("問 ", "").replace("Q:", "").trim();
-      var responseText = "🔍 正在檢索大腦...\n---\n" + searchKnowledge(query);
-      replyToLine(replyToken, responseText, lineToken);
+    // ✨ 核心升級：判斷是否為「指令模式」(字首是否為反斜線 \)
+    if (userMessage.startsWith("/")) {
+      
+      // 將指令與後面的內容切開 (用第一個空白做切割)
+      var firstSpaceIndex = userMessage.indexOf(" ");
+      var command = "";
+      var content = "";
+
+      if (firstSpaceIndex !== -1) {
+        command = userMessage.substring(1, firstSpaceIndex); // 取得 "問"
+        content = userMessage.substring(firstSpaceIndex + 1).trim(); // 取得查詢問題
+      } else {
+        command = userMessage.substring(1); // 沒空白，代表純指令 (例如 \早報)
+      }
+
+      // 🚦 指令路由器 (Switch/Case 邏輯)
+      if (command === "問") {
+        if (!content) {
+          replyToLine(replyToken, "⚠️ 請在 \\問 後面加上空白與問題。例如：「\\問 Taylor Swift 最新專輯」", lineToken);
+          return;
+        }
+        
+        // 呼叫你的檢索大腦函數
+        var responseText = "🔍 正在檢索大腦...\n---\n" + searchKnowledge(content);
+        replyToLine(replyToken, responseText, lineToken);
+        
+      } else if (command === "早報") {
+        
+        // 💡 如果你想手動觸發早報，可以把早報的邏輯寫在這裡
+        // sendMorningBrief();
+        replyToLine(replyToken, "☀️ 已收到早報指令！(需確保功能已串接)", lineToken);
+        
+      } else {
+        // 防呆機制：打錯指令
+        replyToLine(replyToken, `⚠️ 找不到指令：「\\${command}」。\n目前支援的指令有：\\問`, lineToken);
+      }
+
     } else {
+      // 📝 一般模式：沒有 \ 開頭，視為單純筆記，直接呼叫你原本的存檔函數
       saveNote(userMessage);
+      
+      // (可選) 如果你希望存檔後 Line 機器人回覆一下，可以取消下面這行的註解：
+      // replyToLine(replyToken, "✅ 筆記已成功存入大腦！", lineToken);
     }
+
   } catch (err) {
+    if (typeof replyToken !== 'undefined' && lineToken) {
+      try {
+        replyToLine(replyToken, "❌ 系統崩潰了！錯誤訊息：\n" + err.toString(), lineToken);
+      } catch(e) {
+        Logger.log("連報錯都失敗：" + e.toString());
+      }
+    }
     Logger.log("發生錯誤：" + err.toString());
   }
 }
+
+
 
 function replyToLine(replyToken, text, token) {
   var url = 'https://api.line.me/v2/bot/message/reply';
