@@ -78,7 +78,7 @@ function processNightlySummary() {
   【時間基準】現在的台灣標準時間是：${nowTW}。
   【重要格式規則】
   1. 請嚴格將結果以「純 JSON 陣列」格式回傳，開頭必須是 [ ，結尾必須是 ]。
-  2. 請以知識點, 單字, 想法, 代辦事項進行歸類
+  2. 請以知識點, 單字, 想法, 待辦事項進行歸類
   3. 如果 category 是「待辦事項」，請推算它的日期，並嚴格以純字串 YYYY-MM-DD 格式存入 due_at 欄位（例如："2026-04-15"）。絕對不要加上任何時間或時區代碼。
   4. 如果沒有明確時間，或 category 不是待辦事項，due_at 的值必須是 null (注意：不要加雙引號)。
   內容：
@@ -143,6 +143,8 @@ function processNightlySummary() {
           Logger.log(`⚠️ 第 ${index+1} 筆節點向量生成失敗：${e.message}`);
         }
       }
+// ✨ 強制產生台灣純日期
+      var nowTW = Utilities.formatDate(new Date(), "Asia/Taipei", "yyyy-MM-dd");
 
       // 📦 把時間與算好的向量一起打包給 Supabase
       var supabasePayload = {
@@ -150,8 +152,7 @@ function processNightlySummary() {
         "content": node.content,
         "embedding": vector,          
         "due_at": node.due_at || null, 
-        // ✨ 新增這行：強制寫入我們在上面算好的台灣日期 (nowTW)
-        "created_at": nowTW 
+        "created_at": nowTW  // 👈 強制打上台灣的純日期！
       };
 
       var supabaseOptions = {
