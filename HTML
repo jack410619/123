@@ -122,15 +122,14 @@
   <div class="container">
     <h1>BRAIN CORE v2.0</h1>
 
-    <div id="clipboard-container" style="display:none; background-color: #fff3cd; border: 1px solid #ffeeba; padding: 20px; border-radius: 12px; margin: 20px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-        <span style="font-weight: bold; color: #856404; font-size: 1.1em;">📌 雲端剪貼內容</span>
+    <div class="glass-card">
+      <span class="label">Input Thought</span>
         <button onclick="getAndClearCache()" style="background-color: #856404; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; transition: opacity 0.2s;">
           複製並清除
         </button>
-      </div> <div id="cache-text" style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #ddd; word-break: break-all; white-space: pre-wrap; font-family: monospace; color: #333;">
-        </div>
+      </div> <div id="cache-text" ></div>
     </div>
+
     <div class="glass-card">
       <span class="label">Input Thought</span>
       <textarea id="noteInput" rows="4" placeholder="在此輸入新知識、見解或待辦事項..."></textarea>
