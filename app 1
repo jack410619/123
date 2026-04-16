@@ -252,7 +252,7 @@ function searchKnowledge(userQuery) {
 
   var geminiUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + geminiKey;
   var promptText = `你是我的第二大腦助手。今天的日期是 ${new Date().toLocaleDateString('zh-TW')}。
-請根據以下背景知識回答問題。
+請根據以下背景知識回答問題。若資料超過7筆，請預設只提供前7筆，並表示數量過多；若問題中提示跳過限制，則再根據用戶提示回應。
 
 【背景知識記憶】：
 ${contextText}
@@ -278,61 +278,62 @@ function doPost(e) {
   try {
     var contents = JSON.parse(e.postData.contents);
     var event = contents.events[0];
-    // 增加一個防呆：確保進來的是文字訊息，避免貼圖或照片讓程式當機
     if (!event || event.type !== 'message' || event.message.type !== 'text') return; 
 
     var replyToken = event.replyToken;
-    var userMessage = event.message.text.trim(); // 收到訊息先去頭去尾空白
+    var userMessage = event.message.text.trim(); 
 
-    // ✨ 核心升級：判斷是否為「指令模式」(字首是否為反斜線 \)
-    if (userMessage.startsWith("/")) {
+    // ✨ 核心升級：判斷是否為「指令模式」(支援半形/全形的 正/反斜線)
+    if (userMessage.startsWith("/") || userMessage.startsWith("\\") || userMessage.startsWith("／") || userMessage.startsWith("＼")) {
       
-      // 將指令與後面的內容切開 (用第一個空白做切割)
+      // 1. 拆解指令與內容
       var firstSpaceIndex = userMessage.indexOf(" ");
       var command = "";
       var content = "";
 
       if (firstSpaceIndex !== -1) {
-        command = userMessage.substring(1, firstSpaceIndex); // 取得 "問"
-        content = userMessage.substring(firstSpaceIndex + 1).trim(); // 取得查詢問題
+        command = userMessage.substring(1, firstSpaceIndex); 
+        content = userMessage.substring(firstSpaceIndex + 1).trim(); 
       } else {
-        command = userMessage.substring(1); // 沒空白，代表純指令 (例如 \早報)
+        command = userMessage.substring(1); 
       }
 
-      // 🚦 指令路由器 (Switch/Case 邏輯)
+      // 2. 指令分流路由器
       if (command === "問") {
-        if (!content) {
-          replyToLine(replyToken, "⚠️ 請在 \\問 後面加上空白與問題。例如：「\\問 Taylor Swift 最新專輯」", lineToken);
-          return;
-        }
-        
-        // 呼叫你的檢索大腦函數
         var responseText = "🔍 正在檢索大腦...\n---\n" + searchKnowledge(content);
         replyToLine(replyToken, responseText, lineToken);
-        
-      } else if (command === "早報") {
-        
-        // 💡 如果你想手動觸發早報，可以把早報的邏輯寫在這裡
-        // sendMorningBrief();
-        replyToLine(replyToken, "☀️ 已收到早報指令！(需確保功能已串接)", lineToken);
-        
+
+      } else if (command === "存") {
+        if (!content) {
+          replyToLine(replyToken, "⚠️ 請在 \\存 後面加上空白與文字。", lineToken);
+          return;
+        }
+        saveToCache(content);
+        replyToLine(replyToken, "📌 已存入雲端剪貼簿，輸入 \\取 即可領取。", lineToken);
+
+      } else if (command === "取") {
+        var cachedText = getFromCache();
+        if (cachedText) {
+          replyToLine(replyToken, "📋 雲端內容：\n---\n" + cachedText, lineToken);
+        } else {
+          replyToLine(replyToken, "📭 剪貼簿目前是空的喔！", lineToken);
+        }
+
       } else {
-        // 防呆機制：打錯指令
-        replyToLine(replyToken, `⚠️ 找不到指令：「\\${command}」。\n目前支援的指令有：\\問`, lineToken);
+        // 找不到對應指令
+        replyToLine(replyToken, `⚠️ 找不到指令：「\\${command}」。\n支援：\\問、\\存、\\取`, lineToken);
       }
 
     } else {
-      // 📝 一般模式：沒有 \ 開頭，視為單純筆記，直接呼叫你原本的存檔函數
+      // 📝 一般模式：不是斜線開頭，直接存入大腦
       saveNote(userMessage);
-      
-      // (可選) 如果你希望存檔後 Line 機器人回覆一下，可以取消下面這行的註解：
-      // replyToLine(replyToken, "✅ 筆記已成功存入大腦！", lineToken);
+      // replyToLine(replyToken, "✅ 筆記已成功存入大腦！", lineToken); // 需要回覆的話再開啟
     }
 
   } catch (err) {
     if (typeof replyToken !== 'undefined' && lineToken) {
       try {
-        replyToLine(replyToken, "❌ 系統崩潰了！錯誤訊息：\n" + err.toString(), lineToken);
+        replyToLine(replyToken, "❌ 系統崩潰！原因：\n" + err.toString(), lineToken);
       } catch(e) {
         Logger.log("連報錯都失敗：" + e.toString());
       }
@@ -409,4 +410,65 @@ function fetchWithRetry(url, options, maxRetries = 3) {
   
   // 如果重試了 3 次還是不行，就果斷拋出錯誤讓系統停止，保護資料庫
   throw new Error("❌ 呼叫 API 失敗已達最大重試次數 (3次)。");
+}
+
+/**
+ * 雲端剪貼簿：存檔 (先刪除舊的 cached，再存入新的)
+ */
+function saveToCache(content) {
+  var props = PropertiesService.getScriptProperties();
+  var supabaseUrl = props.getProperty('SUPABASE_URL');
+  var supabaseKey = props.getProperty('SUPABASE_KEY');
+  
+  var headers = {
+    "apikey": supabaseKey,
+    "Authorization": "Bearer " + supabaseKey,
+    "Content-Type": "application/json"
+  };
+
+  // 1. 先刪除舊的 cached 資料 (避免卡 BUG)
+  var deleteUrl = `${supabaseUrl}/rest/v1/daily_notes?status=eq.cached`;
+  UrlFetchApp.fetch(deleteUrl, { "method": "delete", "headers": headers });
+
+  // 2. 存入新的資料
+  var insertUrl = `${supabaseUrl}/rest/v1/daily_notes`;
+  var payload = {
+    "content": content,
+    "status": "cached"
+  };
+  UrlFetchApp.fetch(insertUrl, {
+    "method": "post",
+    "headers": headers,
+    "payload": JSON.stringify(payload)
+  });
+}
+
+/**
+ * 雲端剪貼簿：取回 (取回後立即刪除)
+ */
+function getFromCache() {
+  var props = PropertiesService.getScriptProperties();
+  var supabaseUrl = props.getProperty('SUPABASE_URL');
+  var supabaseKey = props.getProperty('SUPABASE_KEY');
+  
+  var headers = {
+    "apikey": supabaseKey,
+    "Authorization": "Bearer " + supabaseKey
+  };
+
+  // 1. 撈取資料
+  var getUrl = `${supabaseUrl}/rest/v1/daily_notes?status=eq.cached&select=content`;
+  var response = UrlFetchApp.fetch(getUrl, { "method": "get", "headers": headers });
+  var data = JSON.parse(response.getContentText());
+
+  if (data && data.length > 0) {
+    var content = data[0].content;
+    
+    // 2. 取回後立即刪除，維持單次使用的剪貼感
+    var deleteUrl = `${supabaseUrl}/rest/v1/daily_notes?status=eq.cached`;
+    UrlFetchApp.fetch(deleteUrl, { "method": "delete", "headers": headers });
+    
+    return content;
+  }
+  return null;
 }
