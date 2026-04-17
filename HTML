@@ -1,244 +1,275 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html>
 <head>
+  <base target="_top">
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BRAIN CORE v2.0</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Second Brain</title>
   <style>
-    /* --- 核心視覺設定 --- */
-    :root { --primary: #7000ff; --bg: #0f0f12; }
-    body { background: var(--bg); color: white; font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 20px; display: flex; justify-content: center; line-height: 1.5; }
-    .container { width: 100%; max-width: 600px; padding-bottom: 50px; }
-    h1 { font-size: 2rem; letter-spacing: 2px; text-align: center; margin-bottom: 30px; background: linear-gradient(45deg, #fff, #7000ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    
-    /* 卡片與標籤 */
-    .glass-card { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 20px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5); }
-    .glass-card.highlight { border: 1px dashed rgba(112, 0, 255, 0.6); background: rgba(112, 0, 255, 0.05); }
-    .label { font-size: 0.8rem; text-transform: uppercase; color: #aaa; margin-bottom: 10px; display: block; font-weight: bold; letter-spacing: 1px; }
-    
-    /* 📌 雲端剪貼簿 (黃色彈出區) */
-    #clipboard-container { border: 1px solid #ffeeba; background: rgba(255, 243, 205, 0.15); display: none; }
-    .clipboard-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
-    .btn-copy-clear { background: #ffeeba; color: #856404; border: none; padding: 8px 15px; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.2s; }
-    .btn-copy-clear:hover { background: #ffdf7e; }
-    #cache-text { background: rgba(0,0,0,0.4); padding: 15px; border-radius: 10px; color: #eee; font-family: monospace; word-break: break-all; white-space: pre-wrap; font-size: 0.95rem; border-left: 3px solid #ffeeba; }
+    :root {
+      --primary: #6366f1;
+      --secondary: #a855f7;
+      --bg: #0f172a;
+      --card-bg: rgba(255, 255, 255, 0.05);
+    }
 
-    /* 輸入框與按鈕 */
-    textarea, input { width: 100%; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; color: white; padding: 15px; box-sizing: border-box; margin-bottom: 15px; font-size: 1rem; outline: none; transition: 0.3s; resize: vertical; }
-    textarea:focus, input:focus { border-color: var(--primary); background: rgba(0,0,0,0.5); }
-    button.btn-main { width: 100%; padding: 15px; border-radius: 12px; border: none; cursor: pointer; font-weight: bold; font-size: 1rem; transition: 0.3s; display: flex; align-items: center; justify-content: center; gap: 8px; }
-    .btn-save { background: var(--primary); color: white; }
-    .btn-save:hover { background: #8a2be2; box-shadow: 0 0 15px rgba(112, 0, 255, 0.4); }
-    .btn-push { background: #333; color: white; border: 1px solid rgba(255,255,255,0.2); }
-    .btn-push:hover { background: #444; }
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+      color: #e2e8f0;
+      min-height: 100vh;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 480px;
+      animation: fadeIn 0.8s ease-out;
+    }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+    h1 {
+      font-size: 24px;
+      font-weight: 800;
+      text-align: center;
+      background: linear-gradient(to right, #818cf8, #c084fc);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 30px;
+      letter-spacing: -1px;
+    }
+
+    .glass-card {
+      background: var(--card-bg);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 24px;
+      padding: 24px;
+      margin-bottom: 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    }
+
+    .label { font-size: 12px; font-weight: 600; text-transform: uppercase; color: #94a3b8; margin-bottom: 8px; display: block; }
+
+    textarea, input {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 12px;
+      color: white;
+      font-size: 16px;
+      transition: 0.3s;
+      box-sizing: border-box;
+      margin-bottom: 15px;
+    }
+
+    textarea:focus, input:focus { outline: none; border-color: var(--primary); background: rgba(0, 0, 0, 0.4); }
+
+    button {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 16px;
+      cursor: pointer;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-save { background: linear-gradient(to right, #4f46e5, #7c3aed); color: white; }
+    .btn-search { background: rgba(255, 255, 255, 0.1); color: white; border: 1px solid rgba(255, 255, 255, 0.2); }
     
-    /* 狀態與搜尋結果 */
-    .status-msg { font-size: 0.85rem; margin-top: 10px; text-align: center; min-height: 20px; color: #ccc; }
-    #result { margin-top: 20px; display: flex; flex-direction: column; gap: 10px; }
-    .result-item { background: rgba(0,0,0,0.3); padding: 15px; border-radius: 10px; border-left: 3px solid var(--primary); font-size: 0.95rem; }
-    .result-meta { font-size: 0.75rem; color: #888; margin-bottom: 5px; }
+    button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(99, 102, 241, 0.4); }
+    button:active { transform: translateY(0); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    #result {
+      margin-top: 20px;
+      padding: 18px;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 16px;
+      font-size: 15px;
+      line-height: 1.6;
+      border-left: 4px solid var(--primary);
+      display: none;
+      animation: slideIn 0.4s ease-out;
+    }
+
+    @keyframes slideIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
+
+    .status-msg { text-align: center; font-size: 13px; margin-top: 10px; color: #818cf8; min-height: 20px; }
   </style>
 </head>
 <body>
+  <div class="container">
+    <h1>BRAIN CORE v2.0</h1>
 
-<div class="container">
-  <h1>BRAIN CORE v2.0</h1>
-
-  <div id="clipboard-container" class="glass-card">
-    <div class="clipboard-header">
-      <span style="color: #ffeeba; font-weight: bold;">📌 雲端剪貼內容 (待領取)</span>
-      <button class="btn-copy-clear" onclick="getAndClearCache()">領取並清除</button>
+    <div id="clipboard-container" class="glass-card" style="display: none;">
+      <span class="label">Cloud Clipboard</span>
+      <div id="cache-text" style="margin-bottom: 15px; padding: 12px; background: rgba(0,0,0,0.3); border-radius: 8px; font-size: 15px;"></div>
+      <button onclick="getAndClearCache()" style="background-color: #ca8a04; color: white; border: none; padding: 10px 16px;">
+        📋 複製並清除
+      </button>
     </div>
-    <div id="cache-text"></div>
-  </div>
 
-  <div class="glass-card highlight">
-    <span class="label">Cross-Device Clipboard</span>
-    <textarea id="webClipboardInput" rows="2" placeholder="輸入網址或文字，推送到手機端..."></textarea>
-    <button class="btn-main btn-push" onclick="saveToCloudClipboard()">
-      <span>🚀</span> 推送到雲端剪貼簿
-    </button>
-    <div id="webClipboardStatus" class="status-msg"></div>
-  </div>
+    <div class="glass-card">
+      <span class="label">Input Thought</span>
+      <textarea id="noteInput" rows="4" placeholder="在此輸入新知識、見解或待辦事項..."></textarea>
+      <button id="saveBtn" class="btn-save" onclick="saveNote()">
+        <span>✦</span> 儲存記憶
+      </button>
+      <div id="saveStatus" class="status-msg"></div>
+    </div>
 
-  <div class="glass-card">
-    <span class="label">Input Thought</span>
-    <textarea id="noteInput" rows="4" placeholder="在此輸入新知識、見解或待辦事項..."></textarea>
-    <button class="btn-main btn-save" onclick="saveNote()">
-      <span>✦</span> 儲存記憶
-    </button>
-    <div id="saveStatus" class="status-msg"></div>
-  </div>
-
-  <div class="glass-card">
-    <span class="label">Semantic Search</span>
-    <input id="queryInput" placeholder="詢問你的大腦...">
-    <button class="btn-main" style="background: #222; color: white;" onclick="searchBrain()">
-      <span>🔍</span> 檢索內容
-    </button>
-    <div id="searchStatus" class="status-msg"></div>
-    <div id="result"></div>
-  </div>
-</div>
+    <div class="glass-card">
+      <span class="label">Semantic Search</span>
+      <input id="queryInput" placeholder="詢問你的大腦...">
+      <button id="searchBtn" class="btn-search" onclick="searchBrain()">
+        <span>🔍</span> 檢索內容
+      </button>
+      <div id="result"></div>
+    </div>
+  </div> 
 
 <script>
-  // ==========================================
-  // 🔑 API 金鑰配置區 (請務必填寫)
-  // ==========================================
-  const SUPABASE_URL = "https://jwgqfukdsytriovvawqt.supabase.co";
+  // 🔧 修復2：你原本的 SUPABASE_URL 貼成了跟下面一樣的金鑰！
+  // 請把這裡改成你真正的 Supabase 專案網址 (https://xxxxxx.supabase.co)
+  const SUPABASE_URL = "https://jwgqfukdsytriovvawqt.supabase.co"; 
   const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp3Z3FmdWtkc3l0cmlvdnZhd3F0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU4MjAxOTAsImV4cCI6MjA5MTM5NjE5MH0.s6ZZFC7YmlyOvtYtVHhBKKrLJ3tfl_QRneEqClSCQ9U";
-  const GEMINI_KEY   = "AIzaSyAFaSnQuajCkAXi6Sbh_GebpnrXsHZjgLE"; 
 
-  // ==========================================
-  // 網頁初始化載入
-  // ==========================================
   window.onload = function() {
-    fetchClipboard(); // 一開網頁就檢查有沒有剪貼簿
-    setInterval(fetchClipboard, 15000); // 每 15 秒自動刷新一次剪貼簿狀態
+    fetchClipboard();
   };
 
-  // ==========================================
-  // 功能 1：檢查並顯示雲端剪貼簿 (來自手機)
-  // ==========================================
+  // 雲端剪貼簿：抓取資料
   async function fetchClipboard() {
-    if (!SUPABASE_URL.startsWith("http")) return; // 防止未填金鑰報錯
+    if (!SUPABASE_URL.startsWith("http")) {
+      console.error("❌ SUPABASE_URL 設定錯誤");
+      return;
+    }
+
+    const url = `${SUPABASE_URL}/rest/v1/daily_notes?status=eq.cached&select=content`;
     try {
-      const url = `${SUPABASE_URL}/rest/v1/daily_notes?status=eq.cached&select=content`;
-      const res = await fetch(url, { headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` } });
-      const data = await res.json();
+      const response = await fetch(url, {
+        headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` }
+      });
+      const data = await response.json();
       
       const container = document.getElementById('clipboard-container');
+      const textElem = document.getElementById('cache-text');
+
       if (data && data.length > 0) {
         container.style.display = 'block';
-        document.getElementById('cache-text').innerText = data[0].content;
+        textElem.innerText = data[0].content;
       } else {
         container.style.display = 'none';
       }
-    } catch (e) { console.error("抓取快取失敗:", e); }
-  }
-
-  // ==========================================
-  // 功能 2：領取雲端剪貼內容並刪除
-  // ==========================================
-  async function getAndClearCache() {
-    const text = document.getElementById('cache-text').innerText;
-    try {
-      await navigator.clipboard.writeText(text); // 複製到系統剪貼簿
-      const url = `${SUPABASE_URL}/rest/v1/daily_notes?status=eq.cached`;
-      await fetch(url, { method: "DELETE", headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` } });
-      
-      document.getElementById('clipboard-container').style.display = 'none';
-      alert("✅ 內容已複製，並從雲端清除！\n現在可以直接按 Ctrl+V 貼上。");
-    } catch (e) { alert("❌ 操作失敗，請手動複製文字。"); }
-  }
-
-  // ==========================================
-  // 功能 3：手動從網頁端推送到雲端剪貼簿
-  // ==========================================
-  async function saveToCloudClipboard() {
-    const content = document.getElementById('webClipboardInput').value.trim();
-    const statusBox = document.getElementById('webClipboardStatus');
-    if (!content) return;
-
-    statusBox.innerText = "⏳ 推送中...";
-    const headers = { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" };
-
-    try {
-      // 先刪除舊的
-      await fetch(`${SUPABASE_URL}/rest/v1/daily_notes?status=eq.cached`, { method: "DELETE", headers: headers });
-      // 存入新的
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/daily_notes`, {
-        method: "POST", headers: headers, body: JSON.stringify({ content: content, status: "cached" })
-      });
-
-      if (res.ok) {
-        statusBox.innerText = "✅ 成功推送到手機！(請在 Line 輸入 \\取)";
-        document.getElementById('webClipboardInput').value = "";
-        fetchClipboard(); // 刷新畫面
-        setTimeout(() => statusBox.innerText = "", 4000);
-      }
-    } catch (e) { statusBox.innerText = "❌ 推送失敗"; }
-  }
-
-  // ==========================================
-  // 功能 4：儲存大腦記憶 (一般筆記)
-  // ==========================================
-  async function saveNote() {
-    const content = document.getElementById('noteInput').value.trim();
-    const statusBox = document.getElementById('saveStatus');
-    if (!content) return;
-
-    statusBox.innerText = "⏳ 正在寫入大腦...";
-    try {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/daily_notes`, {
-        method: "POST",
-        headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ content: content, status: "pending" })
-      });
-      
-      if (res.ok) {
-        statusBox.innerText = "✅ 記憶已成功歸檔";
-        document.getElementById('noteInput').value = "";
-        setTimeout(() => statusBox.innerText = "", 3000);
-      }
-    } catch (e) { statusBox.innerText = "❌ 儲存失敗"; }
-  }
-
-  // ==========================================
-  // 功能 5：語義大腦檢索 (Gemini Embedding + Supabase Vector)
-  // ==========================================
-  async function searchBrain() {
-    const query = document.getElementById('queryInput').value.trim();
-    const resultDiv = document.getElementById('result');
-    const statusBox = document.getElementById('searchStatus');
-    if (!query) return;
-
-    statusBox.innerText = "🧠 正在將問題轉為向量思考中...";
-    resultDiv.innerHTML = "";
-
-    try {
-      // 1. 呼叫 Gemini 取得向量
-      const embedRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${GEMINI_KEY}`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "models/gemini-embedding-001", content: { parts: [{ text: query }] } })
-      });
-      const embedData = await embedRes.json();
-      const embedding = embedData.embedding.values;
-
-      statusBox.innerText = "🔍 正在記憶庫中比對相似度...";
-
-      // 2. 呼叫 Supabase RPC 搜尋相似筆記
-      const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/match_knowledge_nodes`, {
-        method: "POST",
-        headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ query_embedding: embedding, match_threshold: 0.5, match_count: 5 }) // 抓前 5 筆
-      });
-      
-      const matches = await rpcRes.json();
-      statusBox.innerText = "";
-
-      if (!matches || matches.length === 0) {
-        resultDiv.innerHTML = "<div style='color: #aaa; text-align: center;'>📭 找不到相關記憶。</div>";
-      } else {
-        matches.forEach(item => {
-          const div = document.createElement('div');
-          div.className = 'result-item';
-          div.innerHTML = `
-            <div class="result-meta">
-              [${item.category || '未分類'}] • 相似度: ${(item.similarity * 100).toFixed(1)}% 
-              ${item.created_at ? '• 日期: ' + item.created_at : ''}
-            </div>
-            <div>${item.content}</div>
-          `;
-          resultDiv.appendChild(div);
-        });
-      }
-    } catch (e) { 
-      statusBox.innerText = "❌ 檢索出錯，請檢查金鑰或 F12 Console"; 
-      console.error(e);
+    } catch (e) {
+      console.error("抓取快取失敗：", e);
     }
   }
-</script>
 
+  // 雲端剪貼簿：取走並刪除
+  async function getAndClearCache() {
+    const text = document.getElementById('cache-text').innerText;
+    navigator.clipboard.writeText(text); // 複製到電腦剪貼簿
+    
+    const url = `${SUPABASE_URL}/rest/v1/daily_notes?status=eq.cached`;
+    await fetch(url, {
+      method: "DELETE",
+      headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` }
+    });
+    
+    alert("📋 內容已複製，並從雲端清除！");
+    fetchClipboard(); // 重新整理 UI
+  }
+
+  // 🔧 修復3：幫你把前後端溝通的按鈕功能補齊了！
+  // ==========================================
+  // 儲存記憶 (呼叫後端 saveNote)
+  // ==========================================
+  function saveNote() {
+    const noteInput = document.getElementById('noteInput');
+    const content = noteInput.value;
+    const saveBtn = document.getElementById('saveBtn');
+    const statusMsg = document.getElementById('saveStatus');
+
+    if (!content.trim()) {
+      statusMsg.innerText = "⚠️ 內容不能為空喔！";
+      statusMsg.style.color = "#ef4444";
+      return;
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = "<span>⏳</span> 儲存中...";
+    statusMsg.innerText = "";
+
+    google.script.run
+      .withSuccessHandler(function(response) {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = "<span>✦</span> 儲存記憶";
+        
+        if (response.success) {
+          statusMsg.innerText = "✅ " + response.message;
+          statusMsg.style.color = "#10b981";
+          noteInput.value = ""; 
+        } else {
+          statusMsg.innerText = "❌ " + response.message;
+          statusMsg.style.color = "#ef4444";
+        }
+      })
+      .withFailureHandler(function(error) {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = "<span>✦</span> 儲存記憶";
+        statusMsg.innerText = "❌ 系統錯誤：" + error.message;
+        statusMsg.style.color = "#ef4444";
+      })
+      .saveNote(content); 
+  }
+
+  // ==========================================
+  // 檢索內容 (呼叫後端 searchKnowledge)
+  // ==========================================
+  function searchBrain() {
+    const queryInput = document.getElementById('queryInput');
+    const query = queryInput.value;
+    const searchBtn = document.getElementById('searchBtn');
+    const resultDiv = document.getElementById('result');
+
+    if (!query.trim()) {
+      alert("請輸入要詢問的內容！");
+      return;
+    }
+
+    searchBtn.disabled = true;
+    searchBtn.innerHTML = "<span>⏳</span> 檢索中...";
+    resultDiv.style.display = "block";
+    resultDiv.innerText = "🧠 大腦正在高速檢索與思考中，請稍候...";
+
+    google.script.run
+      .withSuccessHandler(function(response) {
+        searchBtn.disabled = false;
+        searchBtn.innerHTML = "<span>🔍</span> 檢索內容";
+        resultDiv.innerHTML = response.replace(/\n/g, '<br>'); 
+      })
+      .withFailureHandler(function(error) {
+        searchBtn.disabled = false;
+        searchBtn.innerHTML = "<span>🔍</span> 檢索內容";
+        resultDiv.innerText = "❌ 發生錯誤：" + error.message;
+      })
+      .searchKnowledge(query); 
+  }
+</script>
 </body>
 </html>
